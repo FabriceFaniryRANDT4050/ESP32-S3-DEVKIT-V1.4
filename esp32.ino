@@ -1,14 +1,29 @@
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 
 // --- Configuration Wi-Fi ---
 const char* ssid     = "EspLink 2";
 const char* password = "1234:56789";
 
-// --- Configuration IP Statique (Réseau 10.55.244.x) ---
-IPAddress local_IP(10, 55, 244, 200);   // IP fixe attribuée à l'ESP32
-IPAddress gateway(10, 55, 244, 163);    // Passerelle / IP du téléphone (Hotspot)
+// --- Nom d'hôte ---
+// Permet d'accéder à l'ESP32 via http://esp32-rgb.local (mDNS) et de
+// l'identifier facilement dans la liste des appareils connectés au routeur.
+const char* hostname = "esp32-rgb";
+
+// --- Configuration IP ---
+// false (recommandé) : l'ESP32 obtient automatiquement son IP via DHCP,
+//                       quel que soit le réseau auquel il se connecte.
+// true               : force une IP fixe (utile seulement si votre routeur
+//                       ne propose pas de réservation DHCP par adresse MAC).
+#define USE_STATIC_IP false
+
+#if USE_STATIC_IP
+// ATTENTION : gateway et local_IP doivent être dans le même sous-réseau.
+IPAddress local_IP(10, 190, 244, 200);
+IPAddress gateway(10, 190, 244, 1);
 IPAddress subnet(255, 255, 255, 0);
+#endif
 
 // --- Configuration Hardware ---
 #define RGB_LED_PIN 48 // Si la LED ne s'allume pas, remplacez par 38
@@ -94,10 +109,17 @@ void setup() {
   Serial.begin(115200);
   setLEDColor(0, 0, 0);
 
-  // Application de la configuration IP Statique AVANT de se connecter
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname(hostname);
+
+#if USE_STATIC_IP
+  // Configuration IP Statique (uniquement si USE_STATIC_IP == true)
   if (!WiFi.config(local_IP, gateway, subnet)) {
     Serial.println("Erreur de configuration IP Statique !");
   }
+#else
+  Serial.println("Mode DHCP : l'IP sera attribuee automatiquement par le reseau.");
+#endif
 
   Serial.print("Connexion au reseau : ");
   Serial.println(ssid);
@@ -109,8 +131,22 @@ void setup() {
   }
 
   Serial.println("\nWi-Fi connecte !");
-  Serial.print("Adresse IP Fixe : http://");
+  Serial.print("Adresse IP : http://");
   Serial.println(WiFi.localIP());
+  Serial.print("Passerelle : ");
+  Serial.println(WiFi.gatewayIP());
+  Serial.print("Masque sous-reseau : ");
+  Serial.println(WiFi.subnetMask());
+
+  // --- mDNS : accès via un nom fixe, quelle que soit l'IP attribuee ---
+  if (MDNS.begin(hostname)) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.print("Accessible aussi via : http://");
+    Serial.print(hostname);
+    Serial.println(".local");
+  } else {
+    Serial.println("Erreur de demarrage mDNS");
+  }
 
   server.on("/", handleRoot);
   server.on("/set", handleSetColor);
@@ -121,10 +157,14 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  // Pas de MDNS.update() sur ESP32 : c'est géré automatiquement.
 
   if (millis() - lastPrintTime >= 1000) {
     lastPrintTime = millis();
-    Serial.print("Accès HTTP : http://");
-    Serial.println(WiFi.localIP());
+    Serial.print("Acces HTTP : http://");
+    Serial.print(WiFi.localIP());
+    Serial.print("  ou  http://");
+    Serial.print(hostname);
+    Serial.println(".local");
   }
 }
